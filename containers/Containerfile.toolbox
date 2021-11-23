@@ -13,27 +13,6 @@ RUN dnf install --disablerepo=updates -y \
     git \
     intltool \
     json-c-devel \
-    langpacks-as \
-    langpacks-bn \
-    langpacks-de \
-    langpacks-es \
-    langpacks-fr \
-    langpacks-gu \
-    langpacks-hi \
-    langpacks-it \
-    langpacks-ja \
-    langpacks-kn \
-    langpacks-ko \
-    langpacks-ml \
-    langpacks-mr \
-    langpacks-or \
-    langpacks-pa \
-    langpacks-pt_BR \
-    langpacks-ru \
-    langpacks-ta \
-    langpacks-te \
-    langpacks-zh_CN \
-    langpacks-zh_TW \
     libdnf-devel \
     libnotify-devel \
     make \
