@@ -5,6 +5,16 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 JUID="$(id -u)"
 JGID="$(id -g)"
 
+if (( $# != 2 )); then
+    >&2 cat << EOF
+    This script requires two arguments.
+
+    Usage: $0 [END_OF_TAG] [PATH_TO_SCRIPT_TO_RUN_IN_CONTAINER]
+    This script runs the subman container in a jenkins environment.
+EOF
+    exit 1
+fi
+
 # The CHANGE_ID environment variable is set by Jenkins for multibranch jobs.
 # It's value is generally the PR number. This is not set anywhere by our
 # bits (yet).  This TAG will be used to give the run a unique name.
@@ -16,16 +26,6 @@ fi
 
 # Run one of our tests inside a newly created toolbox container
 echo "Using container image tag: $TAG"
-
-if (( $# != 2 )); then
-    >&2 cat << EOF
-    This script requires two arguments.
-
-    Usage: $0 [END_OF_TAG] [PATH_TO_SCRIPT_TO_RUN_IN_CONTAINER]
-    This script runs the subman container in a jenkins environment.
-EOF
-    exit
-fi
 
 podman run -t \
   -u $JUID:$JGID \
