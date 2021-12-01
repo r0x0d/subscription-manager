@@ -16,17 +16,25 @@ To create and use a containerized environment it is necessary to have following 
 installed in the system:
 
  * podman
- * toolbox
 
-   $ sudo dnf install -y podman toolbox
+   $ sudo dnf install -y podman
 
 Create a containerized environment
 ----------------------------------
 
 To create a containerized environment you can simply run following script:
 
-    $ toolbox create -i quay.io/candlepin/subscription-manager:main -c rhsm-dev
-    $ toolbox enter rhsm-dev
+    $ podman build -f ./containers/Containerfile.ci --build-arg UID="$(id -u)" -t subman
+    $ podman run -it --rm -v /run/user/$UID/bus:/tmp/bus subman /bin/bash
+
+The above will create a clean sandbox in which to run tests reliably and
+test out subscription-manager.
+
+To do development locally and have the changes reflected locally (inside the con
+tainer) do the following run command from the base subscription-manager source
+directory:
+
+    $ podman run -it --rm -v /run/user/$UID/bus:/tmp/bus -v $PWD:/home/jenkins/subman:Z -w /home/jenkins/subman subman /bin/bash
 
 Reviewing PRs
 -------------
@@ -41,8 +49,4 @@ This means that for any PR which has had the jenkins tests complete
 the jenkins test results (for example if the unit tests failed):
 
     $ git checkout origin pr/XXXX
-    $ toolbox create -i quay.io/candlepin/subscription-manager:PR-XXXX -c PR-XXXX
-    $ toolbox run -c PR-XXXX ./jenkins/unit.sh
-
-Running the following will let you work like normal from within the environment
-    $ toolbox enter PR-XXXX
+    $ podman run -t quay.io/candlepin/subscription-manager:PR-XXXX sh ./jenkins/unit.sh
