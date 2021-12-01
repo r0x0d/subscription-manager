@@ -59,8 +59,8 @@ COPY requirements.txt dev-requirements.txt /build/
 WORKDIR /build
 RUN pip3 install -r dev-requirements.txt && \
     git clone https://github.com/candlepin/subscription-manager.git && \
-    git checkout $GIT_HASH && \
     cd /build/subscription-manager && \
+    git checkout $GIT_HASH && \
     dnf builddep -y ./subscription-manager.spec && \
     python3 ./setup.py build && \
     python3 ./setup.py build_ext --inplace
