@@ -2,7 +2,8 @@ FROM registry.fedoraproject.org/fedora:34
 
 MAINTAINER "Candlepin Team" <candlepin@redhat.com>
 # should be the UID of whatever user is running podman, change this with: podman build --build-arg UID="$(id -u)"
-ARG UID=1020
+ARG UID=1000
+ARG GIT_HASH=main
 ENV SMDEV_CONTAINER_OFF='True'
 
 RUN dnf install --disablerepo=updates -y \
@@ -58,6 +59,7 @@ COPY requirements.txt dev-requirements.txt /build/
 WORKDIR /build
 RUN pip3 install -r dev-requirements.txt && \
     git clone https://github.com/candlepin/subscription-manager.git && \
+    git checkout $GIT_HASH && \
     cd /build/subscription-manager && \
     dnf builddep -y ./subscription-manager.spec && \
     python3 ./setup.py build && \
