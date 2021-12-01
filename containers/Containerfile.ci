@@ -60,6 +60,8 @@ WORKDIR /build
 RUN pip3 install -r dev-requirements.txt && \
     git clone https://github.com/candlepin/subscription-manager.git && \
     cd /build/subscription-manager && \
+    git config --add remote.origin.fetch +refs/pull/*/head:refs/remotes/origin/pr/* && \
+    git fetch && \
     git checkout $GIT_HASH && \
     dnf builddep -y ./subscription-manager.spec && \
     python3 ./setup.py build && \
