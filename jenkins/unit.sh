@@ -22,6 +22,7 @@ python3 setup.py build_ext --inplace
 
 # make sure we have a dbus session for the dbus tests
 dbus-run-session coverage run
-
+RETVAL="$?"
 coverage report
 coverage xml
+exit $RETVAL

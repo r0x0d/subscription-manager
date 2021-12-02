@@ -24,8 +24,7 @@ else
     TAG="PR-$CHANGE_ID-$1-$(git rev-parse --short HEAD)"
 fi
 
-# Run one of our tests inside a newly created toolbox container
-echo "Using container image tag: $TAG"
+echo "Using container name: $TAG"
 
 podman run -t \
   -u $JUID:$JGID \
@@ -39,4 +38,5 @@ podman run -t \
   sh "$2"
 
 RETVAL="$?"
+echo "Test script returned: $RETVAL"
 exit "$RETVAL"
