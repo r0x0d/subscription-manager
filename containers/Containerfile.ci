@@ -13,6 +13,8 @@ RUN dnf install --disablerepo=updates -y \
     gcc \
     gettext \
     git \
+    glibc-langpack-de \
+    glibc-langpack-ja \
     intltool \
     json-c-devel \
     libdnf-devel \
