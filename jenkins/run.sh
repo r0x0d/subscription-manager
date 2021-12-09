@@ -4,6 +4,7 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 # GIT_HASH="$(git rev-parse HEAD)"
 JUID="$(id -u)"
 JGID="$(id -g)"
+WORKSPACE="${WORKSPACE:-$PROJECT_ROOT}"
 
 if (( $# != 2 )); then
     >&2 cat << EOF
