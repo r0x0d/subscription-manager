@@ -50,3 +50,7 @@ the jenkins test results (for example if the unit tests failed):
 
     $ git checkout origin pr/XXXX
     $ podman run -t quay.io/candlepin/subscription-manager:PR-XXXX sh ./jenkins/unit.sh
+
+One can also run the following (for the unit tests or for any tests that jenkins
+runs) (the CHANGE_ID should be the PR number that you are reproducing):
+    $ CHANGE_ID=XXXX ./jenkins/run.sh ./jenkins/unit.sh
