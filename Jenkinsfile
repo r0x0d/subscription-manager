@@ -30,8 +30,6 @@ pipeline {
             sh('./jenkins/run.sh tito jenkins/tito.sh')
           }
         }
-        // TODO: figure if this is needed and implement
-        // stage('RHEL8 unit') {steps {echo 'nose'}}
         stage('unit') {
           steps {
             sh('./jenkins/run.sh unit jenkins/unit.sh')
