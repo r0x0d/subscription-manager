@@ -13,7 +13,7 @@
 #   we need to make /etc/pki/product and /etc/pki/entitlement
 
 echo "GIT_COMMIT:" "${GIT_COMMIT}"
-
+WORKSPACE=${WORKSPACE:-"`git rev-parse --show-toplevel`"}
 cd $WORKSPACE
 
 sudo yum clean expire-cache
