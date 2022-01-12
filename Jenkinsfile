@@ -33,11 +33,29 @@ pipeline {
         stage('unit') {
           steps {
             sh('./jenkins/run.sh unit jenkins/unit.sh')
-            junit('coverage.xml')
             // TODO: find the correct adapter or generate coverage tests that can be
             //       parsed by an existing adapter:
             //       https://plugins.jenkins.io/code-coverage-api/
             // publishCoverage adapters: [jacocoAdapter('coverage.xml')]
+          }
+          post {
+            always {
+              archiveArtifacts allowEmptyArchive: true, artifacts: 'coverage.xml', fingerprint: true
+              // https://www.jenkins.io/doc/pipeline/steps/cobertura/
+              step([$class: 'CoberturaPublisher',
+                            autoUpdateHealth: false,
+                            autoUpdateStability: false,
+                            coberturaReportFile: 'coverage.xml',
+                            failNoReports: false,
+                            failUnhealthy: false,
+                            failUnstable: false,
+                            maxNumberOfBuilds: 10,
+                            onlyStable: false,
+                            sourceEncoding: 'ASCII',
+                            zoomCoverageChart: false])
+              // https://www.jenkins.io/doc/pipeline/steps/junit/
+              junit allowEmptyResults: true, keepLongStdio: true, skipMarkingBuildUnstable: true, skipPublishingChecks: true, testResults: 'coverage.xml'
+            }
           }
         }
         // Unit tests of libdnf plugins
