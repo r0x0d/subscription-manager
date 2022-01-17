@@ -15,9 +15,11 @@
 import os
 import re
 import sys
+from typing import Optional
 
 import urllib.parse
 
+import rhsm.config
 from rhsm.config import DEFAULT_PROXY_PORT
 
 
@@ -276,3 +278,40 @@ def suppress_output(func):
             sys.stderr = stderr
             devnull.close()
     return wrapper
+
+
+class APIStatus:
+    def __init__(self, description: Optional[str]):
+        if description is None:
+            description = "Transmitting data"
+        self.raw_text = description
+
+        CURSIVE = "\033[3m"
+        RESET = "\033[0m"
+
+        self.text = f"{CURSIVE}{self.raw_text}{RESET}"
+
+        self.quiet = False
+        config = rhsm.config.get_config_parser()
+        if config.get("rhsm", "quiet") == "1":
+            self.quiet = True
+        if not sys.stdout.isatty():
+            self.quiet = True
+
+    def print(self):
+        if self.quiet:
+            return
+        print(self.text, end="\r")
+
+    def clean(self):
+        if self.quiet:
+            return
+        print(" " * len(self.text), end="\r")
+
+    def __enter__(self):
+        self.print()
+
+    def __exit__(self, error_type, error_value, traceback):
+        self.clean()
+        if error_type:
+            raise

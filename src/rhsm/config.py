@@ -73,7 +73,8 @@ RHSM_DEFAULTS = {
     'pluginconfdir': '/etc/rhsm/pluginconf.d',
     'auto_enable_yum_plugins': '1',
     'package_profile_on_trans': '0',
-    'inotify': '1'
+    'inotify': '1',
+    'quiet': '0',
 }
 
 RHSMCERTD_DEFAULTS = {

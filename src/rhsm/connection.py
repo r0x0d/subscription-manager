@@ -26,6 +26,7 @@ import sys
 import time
 import traceback
 import tempfile
+from typing import Optional
 
 from email.utils import format_datetime
 
@@ -691,7 +692,11 @@ class BaseRestLib(object):
             self.headers["Accept-Language"] = lc.lower().replace('_', '-').split('.', 1)[0]
 
     # FIXME: can method be empty?
-    def _request(self, request_type, method, info=None, headers=None, cert_key_pairs=None):
+    def _request(
+        self, request_type, method,
+        info=None, headers=None, cert_key_pairs=None,
+        description: Optional[str] = None,
+    ):
         handler = self.apihandler + method
 
         # We try to import it here to get fresh value, because rhsm.service can receive
@@ -727,63 +732,64 @@ class BaseRestLib(object):
 
         response = None
         result = None
-        for cert_file, key_file in cert_key_pairs:
-            try:
-                conn = self._create_connection(cert_file=cert_file, key_file=key_file)
-                ts_start = time.time()
-                conn.request(request_type, handler, body=body, headers=final_headers)
-                ts_end = time.time()
-                response = conn.getresponse()
-                self._update_smoothed_response_time(ts_end - ts_start)
+        with utils.APIStatus(description):
+            for cert_file, key_file in cert_key_pairs:
+                try:
+                    conn = self._create_connection(cert_file=cert_file, key_file=key_file)
+                    ts_start = time.time()
+                    conn.request(request_type, handler, body=body, headers=final_headers)
+                    ts_end = time.time()
+                    response = conn.getresponse()
+                    self._update_smoothed_response_time(ts_end - ts_start)
 
-                result = {
-                    "content": response.read().decode('utf-8'),
-                    "status": response.status,
-                    "headers": dict(response.getheaders())
-                }
-                if response.status == 200:
-                    self.is_consumer_cert_key_valid = True
-                    break  # this client cert worked, no need to try more
-                elif self.cert_dir:
-                    log.debug("Unable to get valid response: %s from CDN: %s" %
-                              (result, self.host))
+                    result = {
+                        "content": response.read().decode('utf-8'),
+                        "status": response.status,
+                        "headers": dict(response.getheaders())
+                    }
+                    if response.status == 200:
+                        self.is_consumer_cert_key_valid = True
+                        break  # this client cert worked, no need to try more
+                    elif self.cert_dir:
+                        log.debug("Unable to get valid response: %s from CDN: %s" %
+                                  (result, self.host))
 
-            except ssl.SSLError:
-                if self.cert_file and not self.cert_dir:
-                    id_cert = certificate.create_from_file(self.cert_file)
-                    if not id_cert.is_valid():
-                        self.is_consumer_cert_key_valid = False
-                        raise ExpiredIdentityCertException()
-                if not self.cert_dir:
+                except ssl.SSLError:
+                    if self.cert_file and not self.cert_dir:
+                        id_cert = certificate.create_from_file(self.cert_file)
+                        if not id_cert.is_valid():
+                            self.is_consumer_cert_key_valid = False
+                            raise ExpiredIdentityCertException()
+                    if not self.cert_dir:
+                        raise
+                except socket.gaierror as err:
+                    if self.proxy_hostname and self.proxy_port:
+                        raise ProxyException("Unable to connect to: %s:%s %s "
+                                             % (normalized_host(self.proxy_hostname),
+                                                safe_int(self.proxy_port),
+                                                err))
                     raise
-            except socket.gaierror as err:
-                if self.proxy_hostname and self.proxy_port:
-                    raise ProxyException("Unable to connect to: %s:%s %s "
-                                         % (normalized_host(self.proxy_hostname),
-                                            safe_int(self.proxy_port),
-                                            err))
-                raise
-            except (socket.error, OSError) as err:
-                # If we get a ConnectionError here and we are using a proxy,
-                # then the issue was the connection to the proxy, not to the
-                # destination host.
-                if isinstance(err, ConnectionError) \
-                    and self.proxy_hostname and self.proxy_port:
-                    raise ProxyException("Unable to connect to: %s:%s %s "
-                                         % (normalized_host(self.proxy_hostname),
-                                            safe_int(self.proxy_port),
-                                            err))
-                code = httplib.PROXY_AUTHENTICATION_REQUIRED.value
-                if str(code) in str(err):
-                    raise ProxyException(err)
-                raise
+                except (socket.error, OSError) as err:
+                    # If we get a ConnectionError here and we are using a proxy,
+                    # then the issue was the connection to the proxy, not to the
+                    # destination host.
+                    if isinstance(err, ConnectionError) \
+                        and self.proxy_hostname and self.proxy_port:
+                        raise ProxyException("Unable to connect to: %s:%s %s "
+                                             % (normalized_host(self.proxy_hostname),
+                                                safe_int(self.proxy_port),
+                                                err))
+                    code = httplib.PROXY_AUTHENTICATION_REQUIRED.value
+                    if str(code) in str(err):
+                        raise ProxyException(err)
+                    raise
 
-        else:
-            if self.cert_dir:
-                raise NoValidEntitlement(
-                    "Cannot access CDN content on: %s using any of entitlement cert-key pair: %s" %
-                    (self.host, cert_key_pairs)
-                )
+            else:
+                if self.cert_dir:
+                    raise NoValidEntitlement(
+                        "Cannot access CDN content on: %s using any of entitlement cert-key pair: %s" %
+                        (self.host, cert_key_pairs)
+                    )
 
         self._print_debug_info_about_response(result)
 
@@ -914,20 +920,20 @@ class BaseRestLib(object):
         if 'error_description' in body:
             return body['error_description']
 
-    def request_get(self, method, headers=None, cert_key_pairs=None):
-        return self._request("GET", method, headers=headers, cert_key_pairs=cert_key_pairs)
+    def request_get(self, method, headers=None, cert_key_pairs=None, description: Optional[str] = None):
+        return self._request("GET", method, headers=headers, cert_key_pairs=cert_key_pairs, description=description)
 
-    def request_post(self, method, params=None, headers=None):
-        return self._request("POST", method, params, headers=headers)
+    def request_post(self, method, params=None, headers=None, description: Optional[str] = None):
+        return self._request("POST", method, params, headers=headers, description=description)
 
-    def request_head(self, method, headers=None):
-        return self._request("HEAD", method, headers=headers)
+    def request_head(self, method, headers=None, description: Optional[str] = None):
+        return self._request("HEAD", method, headers=headers, description=description)
 
-    def request_put(self, method, params=None, headers=None):
-        return self._request("PUT", method, params, headers=headers)
+    def request_put(self, method, params=None, headers=None, description: Optional[str] = None):
+        return self._request("PUT", method, params, headers=headers, description=description)
 
-    def request_delete(self, method, params=None, headers=None):
-        return self._request("DELETE", method, params, headers=headers)
+    def request_delete(self, method, params=None, headers=None, description: Optional[str] = None):
+        return self._request("DELETE", method, params, headers=headers, description=description)
 
     @staticmethod
     def _format_http_date(dt):
@@ -946,9 +952,15 @@ class Restlib(BaseRestLib):
      of communication with the server.
     """
 
-    def _request(self, request_type, method, info=None, headers=None, cert_key_pairs=None):
-        result = super(Restlib, self)._request(request_type, method,
-                                               info=info, headers=headers, cert_key_pairs=cert_key_pairs)
+    def _request(
+        self, request_type, method,
+        info=None, headers=None, cert_key_pairs=None,
+        description: Optional[str] = None,
+    ):
+        result = super(Restlib, self)._request(
+            request_type, method, info=info, headers=headers,
+            cert_key_pairs=cert_key_pairs, description=description,
+        )
 
         # Handle 204s
         if not len(result['content']):
@@ -996,7 +1008,7 @@ class UEPConnection(BaseConnection):
         leave the list of supported resources empty.
         """
         self.resources = {}
-        resources_list = self.conn.request_get("/")
+        resources_list = self.conn.request_get("/", description="Fetching supported resources")
         for r in resources_list:
             self.resources[r['rel']] = r['href']
         log.debug("Server supports the following resources: %s",
@@ -1054,7 +1066,7 @@ class UEPConnection(BaseConnection):
         log.debug("remote connection closed")
 
     def ping(self, username=None, password=None):
-        return self.conn.request_get("/status/")
+        return self.conn.request_get("/status/", description="Checking connection status")
 
     def getJWToken(self, cloud_id, metadata, signature):
         """
@@ -1081,7 +1093,8 @@ class UEPConnection(BaseConnection):
         return self.conn.request_post(
             method="/cloud/authorize",
             params=params,
-            headers=headers
+            headers=headers,
+            description="Fetching cloud token",
         )
 
     def registerConsumer(self, name="unknown", type="system", facts={},
@@ -1137,7 +1150,7 @@ class UEPConnection(BaseConnection):
                     url = url + prepend + self.sanitize(key)
                     prepend = ","
 
-        return self.conn.request_post(url, params, headers=headers)
+        return self.conn.request_post(url, params, headers=headers, description="Registering system")
 
     def hypervisorCheckIn(self, owner, env, host_guest_mapping, options=None):
         """
@@ -1162,7 +1175,7 @@ class UEPConnection(BaseConnection):
 
             query_params = urlencode(params)
             url = "/hypervisors/%s?%s" % (owner, query_params)
-            res = self.conn.request_post(url, host_guest_mapping)
+            res = self.conn.request_post(url, host_guest_mapping, description="Registering hypervisor")
             self.conn.headers['Content-type'] = priorContentType
         else:
             # fall back to original report api
@@ -1170,7 +1183,7 @@ class UEPConnection(BaseConnection):
             # of the new api method
             query_params = urlencode({"owner": owner, "env": env})
             url = "/hypervisors?%s" % (query_params)
-            res = self.conn.request_post(url, host_guest_mapping)
+            res = self.conn.request_post(url, host_guest_mapping, description="Registering hypervisor")
         return res
 
     def hypervisorHeartbeat(self, owner, options=None):
@@ -1189,7 +1202,7 @@ class UEPConnection(BaseConnection):
         params['reporter_id'] = options.reporter_id
         query_params = urlencode(params)
         url = "/hypervisors/%s/heartbeat?%s" % (owner, query_params)
-        return self.conn.request_put(url)
+        return self.conn.request_put(url, description="Updating hypervisor information")
 
     def updateConsumerFacts(self, consumer_uuid, facts={}):
         """
@@ -1252,7 +1265,7 @@ class UEPConnection(BaseConnection):
             params['serviceLevel'] = service_level
 
         method = "/consumers/%s" % self.sanitize(uuid)
-        ret = self.conn.request_put(method, params)
+        ret = self.conn.request_put(method, params, description="Updating consumer information")
         return ret
 
     def addOrUpdateGuestId(self, uuid, guestId):
@@ -1262,19 +1275,19 @@ class UEPConnection(BaseConnection):
         else:
             guest_uuid = guestId['guestId']
         method = "/consumers/%s/guestids/%s" % (self.sanitize(uuid), self.sanitize(guest_uuid))
-        return self.conn.request_put(method, guestId)
+        return self.conn.request_put(method, guestId, description="Updating guest information")
 
     def getGuestIds(self, uuid):
         method = "/consumers/%s/guestids" % self.sanitize(uuid)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching guest information")
 
     def getGuestId(self, uuid, guest_uuid):
         method = "/consumers/%s/guestids/%s" % (self.sanitize(uuid), self.sanitize(guest_uuid))
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching guest information")
 
     def removeGuestId(self, uuid, guest_uuid):
         method = "/consumers/%s/guestids/%s" % (self.sanitize(uuid), self.sanitize(guest_uuid))
-        return self.conn.request_delete(method)
+        return self.conn.request_delete(method, description="Removing guests")
 
     def sanitizeGuestIds(self, guestIds):
         return [self.sanitizeGuestId(guestId) for guestId in guestIds or []]
@@ -1297,7 +1310,7 @@ class UEPConnection(BaseConnection):
         package headers we're interested in. See profile.py.
         """
         method = "/consumers/%s/packages" % self.sanitize(consumer_uuid)
-        return self.conn.request_put(method, pkg_dicts)
+        return self.conn.request_put(method, pkg_dicts, description="Updating profile information")
 
     def updateCombinedProfile(self, consumer_uuid, profile):
         """
@@ -1308,7 +1321,7 @@ class UEPConnection(BaseConnection):
         :return: Dict containing response from HTTP server
         """
         method = "/consumers/%s/profiles" % self.sanitize(consumer_uuid)
-        return self.conn.request_put(method, profile)
+        return self.conn.request_put(method, profile, description="Updating profile information")
 
     # FIXME: username and password not used here
     def getConsumer(self, uuid, username=None, password=None):
@@ -1316,7 +1329,7 @@ class UEPConnection(BaseConnection):
         Returns a consumer object with pem/key for existing consumers
         """
         method = '/consumers/%s' % self.sanitize(uuid)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching consumer keys")
 
     def getConsumers(self, owner=None):
         """
@@ -1326,7 +1339,7 @@ class UEPConnection(BaseConnection):
         if owner:
             method = "%s?owner=%s" % (method, owner)
 
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching consumers")
 
     def getCompliance(self, uuid, on_date=None):
         """
@@ -1336,7 +1349,7 @@ class UEPConnection(BaseConnection):
         if on_date:
             method = "%s?on_date=%s" % (method,
                                         self.sanitize(on_date.isoformat(), plus=True))
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Checking compliance status")
 
     def getSyspurposeCompliance(self, uuid, on_date=None):
         """
@@ -1346,56 +1359,56 @@ class UEPConnection(BaseConnection):
         if on_date:
             method = "%s?on_date=%s" % (method,
                                         self.sanitize(on_date.isoformat(), plus=True))
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Checking system purpose compliance status")
 
     def getOwnerSyspurposeValidFields(self, owner_key):
         """
         Retrieves the system purpose settings available to an owner
         """
         method = '/owners/%s/system_purpose' % self.sanitize(owner_key)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching available system purpose settings")
 
     def createOwner(self, ownerKey, ownerDisplayName=None):
         params = {"key": ownerKey}
         if ownerDisplayName:
             params['displayName'] = ownerDisplayName
         method = '/owners/'
-        return self.conn.request_post(method, params)
+        return self.conn.request_post(method, params, description="Creating organization")
 
     def getOwner(self, uuid):
         """
         Returns an owner object with pem/key for existing consumers
         """
         method = '/consumers/%s/owner' % self.sanitize(uuid)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching organizations")
 
     def deleteOwner(self, key):
         """
         deletes an owner
         """
         method = '/owners/%s' % self.sanitize(key)
-        return self.conn.request_delete(method)
+        return self.conn.request_delete(method, description="Removing organization")
 
     def getOwners(self):
         """
         Returns a list of all owners
         """
         method = '/owners'
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching organizations")
 
     def getOwnerInfo(self, owner):
         """
         Returns an owner info
         """
         method = '/owners/%s/info' % self.sanitize(owner)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching organization information")
 
     def getOwnerList(self, username):
         """
         Returns an owner objects with pem/key for existing consumers
         """
         method = '/users/%s/owners' % self.sanitize(username)
-        owners = self.conn.request_get(method)
+        owners = self.conn.request_get(method, description="Fetching organizations")
         # BZ 1749395 When a user has no orgs, the return value
         #  is an array with a single None element.
         # Ensures the value is the same for a simple None value
@@ -1409,14 +1422,14 @@ class UEPConnection(BaseConnection):
         method = '/owners/%s/hypervisors?' % owner_key
         for hypervisor_id in hypervisor_ids or []:
             method += '&hypervisor_id=%s' % self.sanitize(hypervisor_id)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching organization hypervisors")
 
     def unregisterConsumer(self, consumerId):
         """
          Deletes a consumer from candlepin server
         """
         method = '/consumers/%s' % self.sanitize(consumerId)
-        return self.conn.request_delete(method)
+        return self.conn.request_delete(method, description="Unregistering system")
 
     def getCertificates(self, consumer_uuid, serials=[]):
         """
@@ -1427,14 +1440,14 @@ class UEPConnection(BaseConnection):
         if len(serials) > 0:
             serials_str = ','.join(serials)
             method = "%s?serials=%s" % (method, serials_str)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching certificates")
 
     def getCertificateSerials(self, consumerId):
         """
         Get serial numbers for certs for a given consumer
         """
         method = '/consumers/%s/certificates/serials' % self.sanitize(consumerId)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching certificate serial numbers")
 
     def getAccessibleContent(self, consumerId, if_modified_since=None):
         """
@@ -1449,7 +1462,7 @@ class UEPConnection(BaseConnection):
         if if_modified_since:
             timestamp = BaseRestLib._format_http_date(if_modified_since)
             headers["If-Modified-Since"] = timestamp
-        return self.conn.request_get(method, headers=headers)
+        return self.conn.request_get(method, headers=headers, description="Fetching content for a certificate")
 
     def bindByEntitlementPool(self, consumerId, poolId, quantity=None):
         """
@@ -1458,7 +1471,7 @@ class UEPConnection(BaseConnection):
         method = "/consumers/%s/entitlements?pool=%s" % (self.sanitize(consumerId), self.sanitize(poolId))
         if quantity:
             method = "%s&quantity=%s" % (method, quantity)
-        return self.conn.request_post(method)
+        return self.conn.request_post(method, description="Updating subscriptions")
 
     def bindByProduct(self, consumerId, products):
         """
@@ -1468,7 +1481,7 @@ class UEPConnection(BaseConnection):
         """
         args = "&".join(["product=" + product.replace(" ", "%20") for product in products])
         method = "/consumers/%s/entitlements?%s" % (str(consumerId), args)
-        return self.conn.request_post(method)
+        return self.conn.request_post(method, description="Updating subscriptions")
 
     def bind(self, consumerId, entitle_date=None):
         """
@@ -1484,7 +1497,7 @@ class UEPConnection(BaseConnection):
             method = "%s?entitle_date=%s" % (method,
                                              self.sanitize(entitle_date.isoformat(), plus=True))
 
-        return self.conn.request_post(method)
+        return self.conn.request_post(method, description="Subscribing")
 
     def dryRunBind(self, consumer_uuid, service_level):
         """
@@ -1500,19 +1513,19 @@ class UEPConnection(BaseConnection):
         else:
             method = "/consumers/%s/entitlements/dry-run?service_level=%s" % \
                      (self.sanitize(consumer_uuid), self.sanitize(service_level))
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Simulating subscribing")
 
     def unbindBySerial(self, consumerId, serial):
         method = "/consumers/%s/certificates/%s" % (self.sanitize(consumerId), self.sanitize(str(serial)))
-        return self.conn.request_delete(method)
+        return self.conn.request_delete(method, description="Unsubscribing")
 
     def unbindByPoolId(self, consumer_uuid, pool_id):
         method = "/consumers/%s/entitlements/pool/%s" % (self.sanitize(consumer_uuid), self.sanitize(pool_id))
-        return self.conn.request_delete(method)
+        return self.conn.request_delete(method, description="Unsubscribing")
 
     def unbindAll(self, consumerId):
         method = "/consumers/%s/entitlements" % self.sanitize(consumerId)
-        return self.conn.request_delete(method)
+        return self.conn.request_delete(method, description="Unsubscribing")
 
     def checkin(self, consumerId, checkin_date=None):
         method = "/consumers/%s/checkin" % self.sanitize(consumerId)
@@ -1521,7 +1534,7 @@ class UEPConnection(BaseConnection):
             method = "%s?checkin_date=%s" % (method,
                                              self.sanitize(checkin_date.isoformat(), plus=True))
 
-        return self.conn.request_put(method)
+        return self.conn.request_put(method, description-"Updating checkin date")
 
     def getPoolsList(self, consumer=None, listAll=False, active_on=None, owner=None, filter_string=None, future=None,
                      after_date=None, page=0, items_per_page=0):
@@ -1560,22 +1573,22 @@ class UEPConnection(BaseConnection):
         if items_per_page != 0:
             method = "%s&per_page=%s" % (method, self.sanitize(items_per_page))
 
-        results = self.conn.request_get(method)
+        results = self.conn.request_get(method, description="Fetching pools")
         return results
 
     def getPool(self, poolId, consumerId=None):
         method = "/pools/%s" % self.sanitize(poolId)
         if consumerId:
             method = "%s?consumer=%s" % (method, self.sanitize(consumerId))
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching pool information")
 
     def getProduct(self, product_uuid):
         method = "/products/%s" % self.sanitize(product_uuid)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching product information")
 
     def getRelease(self, consumerId):
         method = "/consumers/%s/release" % self.sanitize(consumerId)
-        results = self.conn.request_get(method)
+        results = self.conn.request_get(method, description="Fetching release information")
         return results
 
     def getAvailableReleases(self, consumerId):
@@ -1588,7 +1601,7 @@ class UEPConnection(BaseConnection):
               (API not implemented in candlepin).
         """
         method = "/consumers/%s/available_releases" % self.sanitize(consumerId)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching available releases")
 
     def getEntitlementList(self, consumerId, request_certs=False):
         method = "/consumers/%s/entitlements" % self.sanitize(consumerId)
@@ -1597,7 +1610,7 @@ class UEPConnection(BaseConnection):
             filters = "?exclude=certificates.key&exclude=certificates.cert"
         else:
             filters = ""
-        results = self.conn.request_get(method + filters)
+        results = self.conn.request_get(method + filters, description="Fetching entitlements")
         return results
 
     def getServiceLevelList(self, owner_key):
@@ -1605,7 +1618,7 @@ class UEPConnection(BaseConnection):
         List the service levels available for an owner.
         """
         method = "/owners/%s/servicelevels" % self.sanitize(owner_key)
-        results = self.conn.request_get(method)
+        results = self.conn.request_get(method, description="Fetching service levels")
         return results
 
     def getEnvironmentList(self, owner_key):
@@ -1616,7 +1629,7 @@ class UEPConnection(BaseConnection):
         can always check with supports_resource("environments").
         """
         method = "/owners/%s/environments" % self.sanitize(owner_key)
-        results = self.conn.request_get(method)
+        results = self.conn.request_get(method, description="Fetching environments")
         return results
 
     def getEnvironment(self, owner_key=None, name=None):
@@ -1635,18 +1648,18 @@ class UEPConnection(BaseConnection):
 
         query_param = urlencode({"name": name})
         url = "/owners/%s/environments?%s" % (self.sanitize(owner_key), query_param)
-        results = self.conn.request_get(url)
+        results = self.conn.request_get(url, description="Fetching environment information")
         if len(results) == 0:
             return None
         return results[0]
 
     def getEntitlement(self, entId):
         method = "/entitlements/%s" % self.sanitize(entId)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching entitlement information")
 
     def regenIdCertificate(self, consumerId):
         method = "/consumers/%s" % self.sanitize(consumerId)
-        return self.conn.request_post(method)
+        return self.conn.request_post(method, description="Updating certificate")
 
     def regenEntitlementCertificates(self, consumer_id, lazy_regen=True):
         """
@@ -1661,7 +1674,7 @@ class UEPConnection(BaseConnection):
         result = False
 
         try:
-            self.conn.request_put(method)
+            self.conn.request_put(method, description="Updating entitlement certificates")
             result = True
         except (RemoteServerException, httplib.BadStatusLine, RestlibException) as e:
             # 404s indicate that the service is unsupported (Candlepin too old, or SAM)
@@ -1687,7 +1700,7 @@ class UEPConnection(BaseConnection):
         result = False
 
         try:
-            self.conn.request_put(method)
+            self.conn.request_put(method, description="Updating entitlement certificate")
             result = True
         except (RemoteServerException, httplib.BadStatusLine, RestlibException) as e:
             # 404s indicate that the service is unsupported (Candlepin too old, or SAM)
@@ -1702,21 +1715,21 @@ class UEPConnection(BaseConnection):
 
     def getStatus(self):
         method = "/status"
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Checking server status")
 
     def getContentOverrides(self, consumerId):
         """
         Get all the overrides for the specified consumer.
         """
         method = "/consumers/%s/content_overrides" % self.sanitize(consumerId)
-        return self.conn.request_get(method)
+        return self.conn.request_get(method, description="Fetching content overrides")
 
     def setContentOverrides(self, consumerId, overrides):
         """
         Set an override on a content object.
         """
         method = "/consumers/%s/content_overrides" % self.sanitize(consumerId)
-        return self.conn.request_put(method, overrides)
+        return self.conn.request_put(method, overrides, description="Updating content overrides")
 
     def deleteContentOverrides(self, consumerId, params=None):
         """
@@ -1725,7 +1738,7 @@ class UEPConnection(BaseConnection):
         method = "/consumers/%s/content_overrides" % self.sanitize(consumerId)
         if not params:
             params = []
-        return self.conn.request_delete(method, params)
+        return self.conn.request_delete(method, params, description="Removing content overrides")
 
     def activateMachine(self, consumerId, email=None, lang=None):
         """
@@ -1740,14 +1753,14 @@ class UEPConnection(BaseConnection):
 
             if lang:
                 method += "&email_locale=%s" % lang
-        return self.conn.request_post(method)
+        return self.conn.request_post(method, description="Activating")
 
     def getSubscriptionList(self, owner_key):
         """
         List the subscriptions for a particular owner.
         """
         method = "/owners/%s/subscriptions" % self.sanitize(owner_key)
-        results = self.conn.request_get(method)
+        results = self.conn.request_get(method, description="Fetching subscriptions")
         return results
 
     def updateSubscriptionList(self, owner_key, auto_create_owner=None, lazy_regen=None):
@@ -1761,7 +1774,7 @@ class UEPConnection(BaseConnection):
         if lazy_regen is not None:
             method += "&lazy_regen=%s" % bool(lazy_regen).lower()
 
-        results = self.conn.request_put(method)
+        results = self.conn.request_put(method, description="Updating subscriptions")
         return results
 
     def getJob(self, job_id):
@@ -1770,7 +1783,7 @@ class UEPConnection(BaseConnection):
         """
         query_params = urlencode({"result_data": True})
         method = "/jobs/%s?%s" % (job_id, query_params)
-        results = self.conn.request_get(method)
+        results = self.conn.request_get(method, description="Fetching job")
         return results
 
     def updateJobStatus(self, job_status):
@@ -1779,7 +1792,7 @@ class UEPConnection(BaseConnection):
         """
         # let key error bubble up
         method = job_status['statusPath']
-        results = self.conn.request_get(method)
+        results = self.conn.request_get(method, description="Updating job status")
         return results
 
     def cancelJob(self, job_id):
@@ -1787,7 +1800,7 @@ class UEPConnection(BaseConnection):
         Given a job id representing a candlepin JobStatus, cancel it.
         """
         method = "/jobs/%s" % (job_id)
-        results = self.conn.request_delete(method)
+        results = self.conn.request_delete(method, description="Cancelling job")
         return results
 
     def sanitize(self, url_param, plus=False):
